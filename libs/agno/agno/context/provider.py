@@ -224,14 +224,23 @@ class ContextProvider(ABC):
         run_context: RunContext | None,
     ):
         """Shared streaming logic for query and update tools."""
+        from agno.context._utils import answer_from_run
+
         kwargs = self._run_kwargs_for_sub_agent(run_context)
         run_id = run_context.run_id if run_context else None
-        final_output: RunOutput | None = None
 
+        if not self.stream_sub_agent_events:
+            # Non-streaming: single await, yield only the final answer
+            output: RunOutput = await agent.arun(message, stream=False, **kwargs)
+            yield answer_from_run(output)
+            return
+
+        # Streaming: forward events and yield answer at the end
+        final_output: RunOutput | None = None
         async for event in agent.arun(
             message,
             stream=True,
-            stream_events=self.stream_sub_agent_events,
+            stream_events=True,
             yield_run_output=True,
             **kwargs,
         ):
@@ -242,8 +251,6 @@ class ContextProvider(ABC):
             yield event
 
         if final_output is not None:
-            from agno.context._utils import answer_from_run
-
             yield answer_from_run(final_output)
 
     def _read_write_tools(self) -> list:
